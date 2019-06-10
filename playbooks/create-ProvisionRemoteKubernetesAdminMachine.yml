@@ -1,0 +1,113 @@
+# Copyright 2019 Green River IT as described in LICENSE.txt distributed with this project on GitHub.
+
+# Get kube config from master.  Later, this fetched kube config will be used to provision the admin machine.   
+# The following tasks are performed in master 
+- name: Get kube config from master
+  hosts: k8smaster
+  remote_user: kubernetes-host
+  become: true
+  become_method: sudo
+  become_user: root
+
+  tasks:
+
+    - name: Fetch kube config and store on Ansible server in a path relative to playbook
+      fetch:
+        src: /home/kubernetes-host/.kube/config
+        dest: kubeadm/config-{{ inventory_hostname }}
+        flat: yes
+
+    - name: Config Location
+      shell: echo kubeadm/config-{{ inventory_hostname }}
+      register: K8S_MASTER_CONFIG_LOCATION
+
+    - name: Add K8S config location to dummy host
+      add_host:
+        name:   "K8S_CONFIG"
+        loc:  "{{ K8S_MASTER_CONFIG_LOCATION.stdout }}"
+
+    - name:
+      debug:
+        msg: "[Master] K8S_CONFIG config location is {{ hostvars['K8S_CONFIG']['loc'] }}"
+
+# Then provision the admin machine including sending it the kube config file that we just fetched from master.  
+# The following tasks are performed on the admin machine.  
+- name: Provision the admin machine
+  hosts: k8sadmin
+  remote_user: kubernetes-host
+  become: true
+  become_method: sudo
+  become_user: root
+
+  tasks:
+     - name: Perform yum update of all packages
+       yum:
+         name: '*'
+         state: latest
+         lock_timeout: 180
+       
+     - name: install package that will be needed later to disable SELinux  
+       yum:
+         name: libselinux-python
+         state: latest
+         lock_timeout: 180
+
+     - name: Disable SELinux
+       selinux:
+         state: disabled
+       become: yes
+       become_user: root
+
+     # Note gpgcheck=0 below is a security hole to avoid over-complicating this demonstration code.  
+     # You need to replace the following with your own private repo after you get this version working with gpgcheck=0.  
+     - name: Define k8s repo with serious security hole to be removed later
+       shell:
+         cmd: |
+           cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+           [kubernetes]
+           name=Kubernetes
+           baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+           enabled=1
+           gpgcheck=0
+           repo_gpgcheck=0
+           gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+           EOF
+       become: yes
+       become_user: root
+
+     - name: install kubectl   
+       yum:
+         name: kubectl
+         state: latest
+         lock_timeout: 180
+
+     - name:
+       debug:
+         msg: "[Admin] K8S_CONFIG config location is {{ hostvars['K8S_CONFIG']['loc'] }}"
+       become: yes
+       become_user: root
+
+     - name: create directory if they don't exist
+       file:
+         path: /home/kubernetes-host/kubeadm
+         state: directory
+         owner: kubernetes-host
+         group: kubernetes-host
+         mode: '0755'
+
+     - name: Copy file with owner and permissions
+       copy:
+         src: "{{ hostvars['K8S_CONFIG']['loc'] }}"
+         dest: "/home/kubernetes-host/{{ hostvars['K8S_CONFIG']['loc'] }}"
+         owner: kubernetes-host
+         group: kubernetes-host
+         mode: '0755'
+
+     - name: Copy file into kube config
+       copy:
+         src: "/home/kubernetes-host/{{ hostvars['K8S_CONFIG']['loc'] }}"
+         dest: "/home/kubernetes-host/.kube/config"
+         remote_src: yes
+         owner: kubernetes-host
+         group: kubernetes-host
+         mode: '0755'

@@ -1,0 +1,9 @@
+# Copyright 2019 Green River IT as described in LICENSE.txt distributed with this project on GitHub. 
+  
+# Run this file to create your Kubernetes Cluster. 
+# The following Playbooks are kept in separate files so that you can call them separately as part of other administration work after the cluster has been created. 
+---
+- import_playbook: create-GenericProvisionKubernetesNodes.yml
+- import_playbook: create-InitializeMasterKubernetesNode.yml
+- import_playbook: create-InitializeWorkerKubernetesNodes.yml
+- import_playbook: create-ProvisionRemoteKubernetesAdminMachine.yml

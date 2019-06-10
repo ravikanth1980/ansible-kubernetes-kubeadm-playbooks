@@ -1,0 +1,109 @@
+# Copyright 2019 Green River IT as described in LICENSE.txt distributed with this project on GitHub.
+---
+# Kubernetes installation steps that apply to all types of nodes.  Will be followed by specific additional steps for each type of node.  
+- name: Install k8s generic all types of nodes.
+  hosts: k8smaster, k8sworker
+  remote_user: kubernetes-host
+  become: true
+  become_method: sudo
+  become_user: root
+
+  tasks:  
+
+     - firewalld:
+         port: 6443/tcp
+         permanent: true
+         immediate: true
+         state: enabled
+
+     - firewalld:
+         port: 10250/tcp
+         permanent: true
+         immediate: true
+         state: enabled
+
+     - name: Perform yum update of all packages
+       yum:
+         name: '*'
+         state: latest
+         lock_timeout: 180
+       
+     - name: remove any previous versions of docker  
+       yum:
+         name: docker, docker-client, docker-client-latest, docker-common, docker-latest, docker-latest-logrotate, docker-logrotate, docker-engine
+         state: absent
+         lock_timeout: 180
+
+     - name: install package that will be needed later to disable SELinux  
+       yum:
+         name: libselinux-python
+         state: latest
+         lock_timeout: 180
+
+     - name: Install docker 
+       command: amazon-linux-extras install -y docker
+
+     - name: Make sure docker service is running
+       systemd:
+         state: started
+         name: docker.service
+       
+     - name: enable service docker and ensure it is not masked
+       systemd:
+         name: docker.service
+         enabled: yes
+         masked: no
+       
+     - name: Add user to docker group
+       command: usermod -a -G docker kubernetes-host
+      
+     - name: Disable SELinux
+       selinux:
+         state: disabled
+       become: yes
+       become_user: root
+
+     # Change the following to accept a variable as the name of the pem file.
+     - name: Copy public key so kubernetes nodes can talk to each other
+       copy:
+         src: ~/.ssh/kubernetes-host.pem
+         dest: /home/kubernetes-host/.ssh
+         force: no
+ 
+     # Also change the following to accept a variable as the name of the pem file
+     - name: Change ownership of pem file so that the nodes can use it to communicate with each other
+       shell: chown kubernetes-host:docker /home/kubernetes-host/.ssh/kubernetes-host.pem
+       become: yes
+       become_user: root
+
+     # Note gpgcheck=0 below is a security hole to avoid over-complicating this demonstration code.  
+     # You need to replace the following with your own private repo after you get this version working with gpgcheck=0.  
+     - name: Define k8s repo with serious security hole to be removed later
+       shell:
+         cmd: |
+           cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+           [kubernetes]
+           name=Kubernetes
+           baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+           enabled=1
+           gpgcheck=0
+           repo_gpgcheck=0
+           gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+           EOF
+       become: yes
+       become_user: root
+
+     # Note: version numbers of kubectl must match the --kubernetes-version argument of the kubeadm init command in other files in this group.
+     - name: install kubelet kubeadm and kubectl   
+       yum:
+         name: kubelet-1.13.1, kubeadm-1.13.1, kubectl-1.13.1, kubernetes-cni-0.6.0
+         state: latest
+
+     - name: enable service kubelet and ensure it is not masked before running kubeadm after
+       systemd:
+         name: kubelet
+         enabled: yes
+         masked: no
+       become: yes 
+       become_method: sudo
+       become_user: root

@@ -1,0 +1,53 @@
+# Copyright 2019 Green River IT as described in LICENSE.txt distributed with this project on GitHub.
+
+# Kubernetes initialization steps for Master.  Assumes that the generic installation has already been completed.    
+- name: Initialize Kubernetes on a Master node 
+  hosts: k8smaster
+  remote_user: kubernetes-host
+  become: true
+  become_method: sudo
+  become_user: root
+
+  tasks:  
+
+     - name: Run kubeadm init using the calico variable just created
+       shell: sudo kubeadm init --kubernetes-version=1.13.1 --pod-network-cidr=192.168.0.0/16 | tee kubeadm-init.out
+       become: yes
+       become_user: root  
+
+     #Confirm that kubeadm init has created the admin.conf file.  This will be necessary before subsequent tasks can be started.  
+     - name: Wait until the file /etc/kubernetes/admin.conf is present before continuing
+       wait_for:
+         path: /etc/kubernetes/admin.conf
+       sudo: true
+       sudo_user: kubernetes-host
+
+     - name: Create kube directory 
+       shell: mkdir -p $HOME/.kube
+       sudo: true
+       sudo_user: kubernetes-host
+
+     - name: Change ownership of /etc/kubernetes so that the next step can copy a config file from it 
+       shell: chown -R kubernetes-host:kubernetes-host /etc/kubernetes
+       become: yes
+       become_user: root
+
+     - name: copy admin_conf file into kube_config directory 
+       shell: cp -i /etc/kubernetes/admin.conf $HOME/.kube/config 
+       sudo: true
+       sudo_user: kubernetes-host
+
+     - name: Change ownership of kube_config file 
+       shell: chown $(id -u):$(id -g) $HOME/.kube/config 
+       sudo: true
+       sudo_user: kubernetes-host       
+
+     - name: Apply the RBAC config file to the cluster
+       shell: kubectl apply -f https://docs.projectcalico.org/v3.3/getting-started/kubernetes/installation/hosted/rbac-kdd.yaml | tee kubeadm-rbac-kdd.out
+       sudo: true
+       sudo_user: kubernetes-host
+
+     - name: Deploy a pod network to the cluster 
+       shell: kubectl apply -f https://docs.projectcalico.org/v3.3/getting-started/kubernetes/installation/hosted/kubernetes-datastore/calico-networking/1.7/calico.yaml | tee kubeadm-calico.out
+       sudo: true
+       sudo_user: kubernetes-host       
